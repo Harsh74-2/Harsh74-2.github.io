@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>&times;5 in the dark: what autoregressive rollout actually costs — Harsh Kumar</title>
+<meta name="description" content="Autoregressive rollout cost my N-body MLP/LSTM/GNN surrogates a 5–6× accuracy penalty — a lower bound, since diverged rollouts were excluded. No architecture escaped the 63–73% error band. What that means for long-horizon prediction with learned models.">
+<link rel="canonical" href="https://harsh74-2.github.io/blog/compounding-cost/">
+<meta name="theme-color" content="#101112">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='42' fill='%23111' stroke='%23a7f3d0' stroke-width='6'/></svg>">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="name" href="/"><b>harsh</b>.kumar</a>
+    <div class="links">
+      <a href="/">Projects</a>
+      <a href="/blog/">Blog</a>
+      <a href="https://github.com/Harsh74-2/n-body-surrogates">Code</a>
+    </div>
+  </div>
+</nav>
+
+<article>
+  <h1>&times;5 in the dark: what autoregressive rollout actually costs</h1>
+  <p class="meta">2026-11-02 &middot; Harsh Kumar &middot; part of the N-body surrogates work</p>
+
+  <p>My bachelor thesis trained neural surrogates — MLP, LSTM, and a graph neural network — to predict gravitational N-body dynamics. The models are good. Test MSE in-distribution sits at 1e-8 to 2e-7 for the MLP and LSTM. If you read only those numbers, you'd conclude the problem is solved.</p>
+
+  <p>It isn't, and the gap between the two headlines is one number: <strong>autoregressive feedback costs roughly 5&ndash;6&times; in accuracy</strong> — measured, and almost certainly a lower bound.</p>
+
+  <h2>What the models are asked to do</h2>
+
+  <p>Predictions are made one step at a time: the model sees a window of recent states and predicts the next one, which is fed back into the next window. That's how any real deployment works — the ground truth of the future isn't available while predicting it. The alternative, rebuilding each window from the reference trajectory, is teacher forcing: it flatters the model, because every step starts from a clean state.</p>
+
+  <p>I measured both, on the same trained checkpoints, across body counts N = 10, 25, 50, 100. The models were trained on a frozen disc initial mass function dataset; the evaluation set is real: seven Solar-System presets built from NASA JPL Horizons ephemerides, with a leapfrog integrator as reference.</p>
+
+  <p>Without feedback (reference-rebuilt windows), checkpoints average about 11&ndash;14% error. With autoregressive feedback, errors compound by a factor of ~4.7&ndash;6.3&times;.</p>
+
+  <div class="note">That factor is a <strong>lower bound</strong>. Rollouts that diverged are excluded from the mean — the full Solar-System preset diverged for <em>every</em> model at <em>every</em> body count. Including them, the picture is worse.</div>
+
+  <h2>No winner, and that was the result</h2>
+
+  <p>Out-of-distribution rollout, averaged over presets with survivors, errors are reported as a percentage of each preset's characteristic scale length L:</p>
+
+  <table>
+    <tr><th>Model</th><th>N=10</th><th>N=25</th><th>N=50</th><th>N=100</th></tr>
+    <tr><td>MLP</td><td>66.6%</td><td>68.9%</td><td>64.6%</td><td>65.6%</td></tr>
+    <tr><td>LSTM</td><td>64.7%</td><td>70.8%</td><td>64.0%</td><td>diverged</td></tr>
+    <tr><td>GNN</td><td>69.3%</td><td>66.7%</td><td>73.0%</td><td>72.2%</td></tr>
+  </table>
+
+  <p>Nearly every cell lands in a 63&ndash;73% band. Architecture doesn't matter. Body count doesn't matter. The task under feedback is essentially <em>fail-or-plateau</em>: either the rollout holds together for a while, or it comes apart entirely — and while it holds, error accumulates toward roughly two-thirds of the system scale regardless of how carefully the model was built. The N=100 LSTM is the cautionary tale: it diverged outright, and even the &ldquo;stable&rdquo; variant hit 97.9% error on the single preset that survived.</p>
+
+  <p>The GNN does win in-distribution long-horizon drift at high N (8.91e-04 vs much worse for the MLP/LSTM at K=50 rollout steps) — but pays for it in latency, scaling from ~2 ms at N=10 to 33&ndash;68 ms per step at N=100, against the MLP's ~0.25 ms. And none of that in-distribution advantage survived contact with the real Solar System under feedback.</p>
+
+  <h2>The gotcha that quietly ruins your evaluation</h2>
+
+  <p>One implementation detail cost me a full re-run. My GNN wraps recurrence inside a <code>model.step()</code> method — stateful, convenient, and wrong for out-of-distribution evaluation: it carries internal state across calls in a way that doesn't match the training-time distribution. The correct protocol is a stateless <strong>sliding window</strong> (W=5 in my setup): always feed the model the last 5 states, take the prediction, append it, slide forward. If your rollout numbers look suspiciously good, check whether the model is leaking internal state that training didn't teach it.</p>
+
+  <h2>What I'd tell anyone building this</h2>
+
+  <ul>
+    <li><strong>Report the compounding factor, not just endpoint error.</strong> &ldquo;11% error&rdquo; and &ldquo;65% error&rdquo; are the same model, with and without feedback. A paper that reports only one is describing deployment conditions it isn't honest about.</li>
+    <li><strong>Report diverged cells.</strong> Excluding the full Solar-System row because &ldquo;everything diverged&rdquo; turns a 6&times; penalty into an optimistic summary. Divergence <em>is</em> the result.</li>
+    <li><strong>Teacher forcing is a different experiment.</strong> Fine for diagnosing the model, misleading for estimating deployment accuracy.</li>
+    <li><strong>Architectural complexity buys nothing under feedback.</strong> Three very different inductive biases converged to the same plateau. If feedback compounding is the bottleneck, the next dollar goes into the training objective (e.g. rollout/energy-aware losses) or error correction — not a bigger network.</li>
+  </ul>
+
+  <p>Full audit: <a class="textlink" href="https://harsh74-2.github.io/N-body-surrogates/">the benchmark pages</a> and <a class="textlink" href="https://github.com/Harsh74-2/n-body-surrogates">source</a>. Numbers above come straight from the result files, post-retrain 2026-09-22.</p>
+
+  <p><em>If this was useful, the best support is building something with the audit methodology and telling me what breaks. Code is MIT-licensed.</em></p>
+
+  <!-- TODO (monetization, after signup): replace / uncomment:
+  <p><a class="textlink" href="https://ko-fi.com/YOURNAME">Support this work on Ko-fi &nearr;</a> &middot; affiliate links to hardware/books used for this project go here — mark them as affiliates.</p>
+  -->
+
+  <a class="back" href="/blog/">&larr; All posts</a>
+</article>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="/">Portfolio</a>
+      <a href="https://harsh74-2.github.io/N-body-surrogates/">Benchmark site</a>
+      <a href="https://github.com/Harsh74-2">GitHub</a>
+    </div>
+    <span class="fine">&copy; 2026 Harsh Kumar</span>
+  </div>
+</footer>
+
+</body>
+</html>

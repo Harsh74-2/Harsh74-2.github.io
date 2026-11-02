@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validating a dynamics surrogate out of distribution (without fooling yourself) — Harsh Kumar</title>
+<meta name="description" content="Six ways a learned dynamics model looks great in-distribution and fails on real data — a checklist distilled from validating MLP/LSTM/GNN N-body surrogates against NASA JPL Horizons Solar-System ephemerides.">
+<link rel="canonical" href="https://harsh74-2.github.io/blog/ood-checklist/">
+<meta name="theme-color" content="#101112">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='42' fill='%23111' stroke='%23a7f3d0' stroke-width='6'/></svg>">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="name" href="/"><b>harsh</b>.kumar</a>
+    <div class="links">
+      <a href="/">Projects</a>
+      <a href="/blog/">Blog</a>
+      <a href="https://github.com/Harsh74-2/n-body-surrogates">Code</a>
+    </div>
+  </div>
+</nav>
+
+<article>
+  <h1>Validating a dynamics surrogate out of distribution (without fooling yourself)</h1>
+  <p class="meta">2026-11-02 &middot; Harsh Kumar &middot; distilled from the N-body surrogates audit</p>
+
+  <p>My surrogates scored test MSE of 1e-8 to 2e-7 in-distribution. Pointed at the real Solar System, full-system rollouts diverged for <em>every</em> model I trained, at every body count. Nothing about the in-distribution score predicted that.</p>
+
+  <p>This post is the checklist that gap forced me to build. It's specific to dynamical-system surrogates (physics, time series, control), but most of it transfers to any model that will see data unlike its training set. Test data comes from seven Solar-System presets built from NASA JPL Horizons ephemerides; training was a synthetic frozen-disc dataset. Every number below is from the public <a class="textlink" href="https://harsh74-2.github.io/N-body-surrogates/">benchmark pages</a>.</p>
+
+  <h2>1. Evaluate in deployment mode, not training mode</h2>
+
+  <p>Training feeds ground-truth history. Deployment feeds the model its own predictions. For my checkpoints the difference was a measured 4.7&ndash;6.3&times; error penalty, and it's a lower bound because diverged rollouts were excluded from the mean. If your eval loop imports anything from the training loop, audit it — mine had a recurrence hidden inside <code>model.step()</code> that silently mismatched the sliding-window protocol (W=5) the models were actually trained for.</p>
+
+  <h2>2. Use real initial conditions, not resampled training data</h2>
+
+  <p>Held-out test splits of a synthetic dataset measure interpolation, not generalization. Pull real initial states from an independent source — JPL Horizons gives ephemerides for free. The distribution shift this exposes is exactly the one production will see. In my case, OOD single-step error ranged from ~0.3% (best model, solar-system-extended preset) to 25&ndash;30% (inner-planets and sun-earth-only presets) — a spread invisible from in-distribution metrics, which all sat near 1e-8.</p>
+
+  <h2>3. Normalize error by the system's own scale</h2>
+
+  <p>Raw MSE across systems of different sizes is meaningless: an Earth-and-Sun system has a smaller characteristic length than the full Solar System, so the same absolute error is a different physical failure. I report every error as a percentage of the preset's scale length L. Deciding which presets are comparable becomes honest instead of decorative.</p>
+
+  <h2>4. Define divergence and count it as data</h2>
+
+  <p>&ldquo;Diverged&rdquo; must be a defined event — mine is error exceeding 100% of L during rollout — and it belongs in the result table, not a footnote. The full Solar-System preset diverged for every model at every N. Suppressing that row would have turned my summary from &ldquo;a 5&ndash;6&times; penalty with complete failure on the hardest preset&rdquo; into a much happier-sounding number that describes nothing a user would experience.</p>
+
+  <h2>5. Beware survivor bias in the mean</h2>
+
+  <p>Most presets kept only two surviving presets (inner planets, sun-earth-only). Averaged over survivors only, the OOD rollout mean looks like a tidy 63&ndash;73% plateau. But the N=100 LSTM averaged 97.9% over a single surviving preset — its &ldquo;mean&rdquo; is one near-death rollout. Always report, per cell, how many presets survived before you read the average.</p>
+
+  <h2>6. Check scaling claims at both ends</h2>
+
+  <p>The model that generalizes best might be the one you can't afford. My GNN had the best in-distribution long-horizon drift at N=100 (8.91e-04) but per-step latency grew from ~2 ms at N=10 to 33&ndash;68 ms at N=100, against the MLP's ~0.25 ms flat. If your deployment has a wall clock, latency-at-scale is part of the evaluation, not an implementation footnote.</p>
+
+  <h2>The one-line summary</h2>
+
+  <p>In-distribution scores measure the model. Out-of-distribution rollout measures the <em>system</em> — model plus feedback loop plus data distribution. Only the second number is the product.</p>
+
+  <ul>
+    <li><a class="textlink" href="https://harsh74-2.github.io/N-body-surrogates/">Benchmark pages</a> — full rollout and single-step audits</li>
+    <li><a class="textlink" href="https://github.com/Harsh74-2/n-body-surrogates">Source code</a> — MIT licensed; the eval harness is reusable on your own dynamics data</li>
+    <li><a class="textlink" href="/blog/compounding-cost/">Companion post</a> — what autoregressive feedback costs, measured</li>
+  </ul>
+
+  <!-- TODO (monetization, after signup): replace / uncomment:
+  <p><a class="textlink" href="https://ko-fi.com/YOURNAME">Support this work on Ko-fi &nearr;</a></p>
+  -->
+
+  <a class="back" href="/blog/">&larr; All posts</a>
+</article>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="/">Portfolio</a>
+      <a href="https://harsh74-2.github.io/N-body-surrogates/">Benchmark site</a>
+      <a href="https://github.com/Harsh74-2">GitHub</a>
+    </div>
+    <span class="fine">&copy; 2026 Harsh Kumar</span>
+  </div>
+</footer>
+
+</body>
+</html>
