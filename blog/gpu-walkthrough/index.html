@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Train your own neural surrogate for N-body dynamics in an afternoon — Harsh Kumar</title>
+<meta name="description" content="A hands-on walkthrough: build and train a small per-body MLP surrogate for gravitational N-body dynamics in PyTorch, evaluate it honestly with sliding-window rollout, and know when renting a GPU actually pays off.">
+<link rel="canonical" href="https://harsh74-2.github.io/blog/gpu-walkthrough/">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='42' fill='%23111' stroke='%23a7f3d0' stroke-width='6'/></svg>">
+<meta name="theme-color" content="#101112">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="name" href="/"><b>harsh</b>.kumar</a>
+    <div class="links">
+      <a href="/">Projects</a>
+      <a href="/blog/">Blog</a>
+      <a href="https://github.com/Harsh74-2/n-body-surrogates">Code</a>
+    </div>
+  </div>
+</nav>
+
+<article>
+  <h1>Train your own neural surrogate for N-body dynamics in an afternoon</h1>
+  <p class="meta">2026-11-02 &middot; Harsh Kumar &middot; hands-on companion to the N-body surrogates work</p>
+
+  <p>You don't need a datacenter to make a neural network learn gravity. You need a simulation, a sliding window, and a model small enough to train before your coffee cools. This post walks through exactly that: a per-body MLP surrogate you can build this afternoon &mdash; and, more importantly, how to <em>evaluate</em> it without fooling yourself, which is where most attempts quietly fail.</p>
+
+  <p>Everything here scales up: the same skeleton is what my thesis work expanded to LSTM and GNN surrogates trained at body counts up to 100. The full benchmark lives at <a class="textlink" href="https://harsh74-2.github.io/N-body-surrogates/">n-body-surrogates</a>; the code below is the minimal sketch you'd write for yourself.</p>
+
+  <h2>Step 0: what you need</h2>
+  <ul>
+    <li>Python + PyTorch, any recent version</li>
+    <li>A simulator (30 lines: leapfrog integration of N bodies, see any celestial mechanics primer &mdash; or use <code>numpy</code> alone)</li>
+    <li>A GPU? Not initially. A small per-body MLP trains in minutes on a laptop CPU. Rent one only when you scale to GNNs or thousands of trajectories &mdash; more in &sect;6.</li>
+  </ul>
+
+  <h2>Step 1: generate trajectories</h2>
+
+  <p>Train on simulated data. Draw N bodies with masses from a chosen initial mass function, random positions and velocities, integrate with leapfrog at fixed &Delta;t, and store per-timestep states <code>(x, y, z, vx, vy, vz)</code>. Freeze the dataset <em>before</em> you train and never regenerate it against a failing model &mdash; a regenerated dataset is a test set you'll contaminate without noticing.</p>
+
+  <p>Standardize every feature (positions and velocities separately, per axis). Surrogate training is miserable with unstandardized physics: positions span a parsec, velocities a few km/s, and MSE doesn't care equally about both.</p>
+
+  <h2>Step 2: sliding windows, not whole trajectories</h2>
+
+  <pre><code># W=5 sliding window: each sample is a (W, n_features) history
+def make_windows(traj, W=5):
+    xs, ys = [], []
+    for t in range(W, len(traj) - 1):
+        xs.append(traj[t-W:t])   # history
+        ys.append(traj[t+1])     # next state
+    return np.array(xs), np.array(ys)</code></pre>
+
+  <p>This window shape is load-bearing. It matches deployment: at predict time the model always sees the last W states, whatever their source. Keep it identical between training and rollout, or your eval silently measures a different model than the one you trained.</p>
+
+  <h2>Step 3: a per-body MLP</h2>
+
+  <p>The trick that made the thesis work at variable N: model <em>each body independently</em>. Each body's network input is its own history plus (optionally) a small pooled summary of the others &mdash; masses, distances, relative vectors. One shared network, applied per body, handles N=10 or N=100 with the same parameters.</p>
+
+  <pre><code>class PerBodyMLP(nn.Module):
+    def __init__(self, in_features=6*5, hidden=128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_features, hidden), nn.GELU(),
+            nn.Linear(hidden, hidden), nn.GELU(),
+            nn.Linear(hidden, 6))          # predicts (x,y,z,vx,vy,vz) delta
+
+    def forward(self, window):             # window: (B, W, 6)
+        B, W, F = window.shape
+        return self.net(window.flatten(start_dim=1))</code></pre>
+
+  <p>Predict the <em>delta</em> to the last known state, not the absolute next state &mdash; residues are small, well-behaved, and the model starts near-correct instead of learning "space is big."</p>
+
+  <h2>Step 4: train</h2>
+
+  <pre><code>model = PerBodyMLP().to DEVICE
+opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+loss_fn = nn.MSELoss()
+for epoch in range(...):
+    for xb, yb in loader:      # windows from MANY different trajectories
+        xb, yb = xb.to(DEVICE), yb.to(DEVICE)
+        pred = xb[:, -1, :6] + model(xb)     # delta on last state
+        loss = loss_fn(pred, yb)
+        opt.zero_grad(); loss.backward(); opt.step()</code></pre>
+
+  <p>Mine your windows from many unrelated trajectories, not one long clip &mdash; window diversity is what makes the model generalize across systems. A few thousand windows is enough; training is minutes on CPU, seconds on any GPU.</p>
+
+  <h2>Step 5: the evaluation that matters</h2>
+
+  <p>This is the step people skip, and it's the one that separates a demo from a result (details in my <a class="textlink" href="../compounding-cost/">rollout post</a>):</p>
+
+  <ul>
+    <li><strong>Feed predictions back.</strong> Predict state t+1 from your window, append <em>your prediction</em>, slide forward. Teacher forcing (appending ground truth) will flatter the model by &times;5&ndash;6 and tell you nothing about deployment.</li>
+    <li><strong>Hold out real systems.</strong> If your training data is synthetic disc configurations, test on initial conditions the model never saw a family of &mdash; in the thesis work, real Solar-System ephemerides.</li>
+    <li><strong>Report divergence, not just mean error.</strong> A rollout that explodes is a result, not a to-be-suppressed footnote.</li>
+  </ul>
+
+  <h2>&sect;6: when does renting a GPU actually pay off?</h2>
+
+  <p>Be honest with yourself about the scaling: an MLP on a few thousand windows is a CPU job. GPU rental earns its cost when you (a) move to GNN surrogates &mdash; my GNN was dramatically better in-distribution at high body counts &mdash; (b) widen your dataset to millions of windows, or (c) run sweep after sweep during experiment search. Then an on-demand GPU by the hour beats owning anything, since a couple of dollars of compute covers a full experiment day at the small end.</p>
+
+  <p>Same honesty applies in reverse: before renting anything, spend the laptop minutes and confirm your pipeline is right. The GPU multiplies velocity, not correctness.</p>
+
+  <p>That's the whole thing: simulate, window, per-body model, honest rollout. If you build something with it, tell me &mdash; and if your rollout finds a failure mode my benchmark doesn't show, that's exactly the data I want next.</p>
+
+  <p><a class="textlink" href="https://github.com/Harsh74-2/n-body-surrogates">Full benchmark source (MIT)</a> &middot; <a class="textlink" href="https://harsh74-2.github.io/N-body-surrogates/">Results &amp; audit tables</a></p>
+
+  <!-- TODO (monetization, pending approval): insert RunPod affiliate link here when approved:
+  <p><a class="textlink" href="RUNPOD_TRACKING_URL">The GPUs I scale these experiments up on (RunPod &nearr;)</a> &mdash; <em>affiliate link, supports the blog at no cost to you</em></p>
+  -->
+  <!-- TODO (monetization, pending approval): Pinecone link belongs in a future retrieval/post-processing post:
+  <p>Pinecone affiliate link TBD.</p>
+  -->
+
+  <p><a class="textlink" href="https://ko-fi.com/harsh40194">Support this work on Ko-fi &nearr;</a></p>
+
+  <a class="back" href="/blog/">&larr; All posts</a>
+</article>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="/">Portfolio</a>
+      <a href="https://harsh74-2.github.io/N-body-surrogates/">Benchmark site</a>
+      <a href="https://github.com/Harsh74-2">GitHub</a>
+      <a href="https://ko-fi.com/harsh40194" class="support">Support this work &nearr;</a>
+    </div>
+    <span class="fine">&copy; 2026 Harsh Kumar</span>
+  </div>
+</footer>
+
+</body>
+</html>
