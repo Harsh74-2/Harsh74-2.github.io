@@ -46,6 +46,18 @@
   /* single eyebrow: only the thesis section carries a label */
   #thesis h2 { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; }
 
+  /* motion system (same language as the portfolio, recruiter-calibrated) */
+  .aurora-fld { position: fixed; inset: -20%; z-index: -1; pointer-events: none;
+    background: radial-gradient(42% 34% at 18% 12%, rgba(110,231,183,.075), transparent 70%),
+                radial-gradient(38% 30% at 84% 22%, rgba(56,189,248,.06), transparent 70%);
+    animation: aur 26s ease-in-out infinite alternate; }
+  @keyframes aur { to { transform: translate3d(-3%, 2%, 0) scale(1.06); } }
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 26px; }
+  .metrics .m { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; transition: transform .4s cubic-bezier(.16,1,.3,1), border-color .4s; }
+  .metrics .m:hover { transform: translateY(-3px); border-color: var(--accent); }
+  .metrics .m b { display: block; font-size: 24px; color: var(--accent); font-weight: 700; letter-spacing: -0.02em; }
+  .metrics .m span { font-size: 12.5px; color: var(--muted); }
+
   .entry + .entry { margin-top: 22px; }
   .entry-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
   .entry-head h3 { font-size: 17px; line-height: 1.3; }
@@ -65,7 +77,7 @@
 
   @media print {
     :root { --bg: #fff; --text: #1a1a1a; --muted: #444; --line: #ccc; --accent: #0a6e46; --bg-soft: #fff; }
-    nav, .dl, footer { display: none !important; }
+    nav, .dl, footer, .aurora-fld, .metrics { display: none !important; }
     * { animation: none !important; transition: none !important; opacity: 1 !important; transform: none !important; }
     body { background: #fff; }
     header.resume-top { padding: 0 0 12px; }
@@ -74,6 +86,7 @@
     .wrap { max-width: none; }
   }
   @media (max-width: 640px) {
+    .metrics { grid-template-columns: 1fr 1fr; }
     .entry-head { flex-direction: column; gap: 0; }
     .skills .row { flex-direction: column; gap: 0; }
   }
@@ -92,8 +105,13 @@
     .dl { transition: transform .3s cubic-bezier(.16,1,.3,1), filter .3s, box-shadow .3s; }
     .dl:hover { transform: translateY(-2px); }
     .dl:active { transform: translateY(0); }
-    @keyframes rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
-    .resume-top > * { animation: rise .7s cubic-bezier(.16,1,.3,1) both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(22px); filter: blur(5px); } to { opacity: 1; transform: none; filter: none; } }
+    .resume-top > * { animation: rise .8s cubic-bezier(.16,1,.3,1) both; }
+    .metrics .m { animation: rise .8s cubic-bezier(.16,1,.3,1) both; }
+    .metrics .m:nth-child(1) { animation-delay: .45s; }
+    .metrics .m:nth-child(2) { animation-delay: .52s; }
+    .metrics .m:nth-child(3) { animation-delay: .59s; }
+    .metrics .m:nth-child(4) { animation-delay: .66s; }
     .resume-top > :nth-child(2) { animation-delay: .08s; }
     .resume-top > :nth-child(3) { animation-delay: .16s; }
     .resume-top > :nth-child(4) { animation-delay: .22s; }
@@ -103,6 +121,8 @@
 </style>
 </head>
 <body>
+
+<div class="aurora-fld" aria-hidden="true"></div>
 
 <nav>
   <div class="wrap">
@@ -128,6 +148,12 @@
     </div>
     <a class="dl" href="resume.pdf" download>Download PDF</a>
     <a class="dl ghost" href="index.html">Portfolio</a>
+    <div class="metrics">
+      <div class="m"><b>3</b><span>model families benchmarked</span></div>
+      <div class="m"><b>7</b><span>Solar-System OOD presets</span></div>
+      <div class="m"><b>5x</b><span>measured autoregressive penalty</span></div>
+      <div class="m"><b>N 10-100</b><span>per-body variable-N range</span></div>
+    </div>
   </header>
 </div>
 
