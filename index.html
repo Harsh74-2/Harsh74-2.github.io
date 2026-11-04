@@ -4,99 +4,129 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Harsh Kumar - Machine Learning Portfolio</title>
-<meta name="description" content="Harsh Kumar, BSc Computer Science. Physics-informed machine learning: MLP, LSTM and GNN surrogates for N-body gravitational dynamics, plus WebXR experiments.">
+<meta name="description" content="Harsh Kumar, BSc CS. Physics-informed machine learning: MLP, LSTM and GNN surrogates for N-body dynamics validated on real Solar-System ephemerides, plus an agent-eval harness and a VR platform with an LLM guide.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='42' fill='%23111' stroke='%23a7f3d0' stroke-width='6'/></svg>">
 <style>
+  @font-face { font-family: "Satoshi"; src: url("fonts/Satoshi-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+  @font-face { font-family: "Satoshi"; src: url("fonts/Satoshi-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
   :root {
-    --bg: #101112;
-    --bg-soft: #17181a;
-    --text: #e6e7e8;
-    --muted: #9a9c9e;
-    --accent: #6ee7b7;
-    --line: #26282a;
+    --bg: #0e0f11; --bg-soft: #17181a; --text: #e6e7e8; --muted: #9a9c9e;
+    --accent: #6ee7b7; --accent2: #38bdf8; --line: #26282a;
     --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
     --sans: "Satoshi", system-ui, "Segoe UI", sans-serif;
   }
-  @font-face { font-family: "Satoshi"; src: url("fonts/Satoshi-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
-  @font-face { font-family: "Satoshi"; src: url("fonts/Satoshi-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
   * { box-sizing: border-box; margin: 0; }
-  html { scroll-behavior: smooth; }
-  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { animation: none !important; transition: none !important; } }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font: 16px/1.6 var(--sans);
-    -webkit-font-smoothing: antialiased;
-  }
+  html { scroll-behavior: smooth; color-scheme: dark; }
+  body { background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; overflow-x: clip; }
   a { color: inherit; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
 
-  /* nav */
-  nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
-  nav .wrap { display: flex; justify-content: space-between; align-items: center; height: 60px; }
+  /* aurora field: two slow drifting light sources, no purple, very low alpha */
+  .aurora { position: fixed; inset: -20%; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(42% 34% at 18% 12%, rgba(110,231,183,.085), transparent 70%),
+      radial-gradient(38% 30% at 84% 22%, rgba(56,189,248,.07), transparent 70%),
+      radial-gradient(46% 38% at 50% 90%, rgba(110,231,183,.05), transparent 70%);
+    animation: drift 26s ease-in-out infinite alternate;
+  }
+  @keyframes drift { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(-3%,2%,0) scale(1.06); } }
+
+  nav { position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; justify-content: space-between; align-items: center; height: 58px; }
   nav .name { font-family: var(--mono); font-size: 14px; text-decoration: none; }
   nav .name b { color: var(--accent); font-weight: 600; }
-  nav .links { display: flex; gap: 24px; font-size: 14px; }
-  nav .links a { color: var(--muted); text-decoration: none; }
+  nav .links { display: flex; gap: 22px; font-size: 14px; }
+  nav .links a { color: var(--muted); text-decoration: none; transition: color .3s; }
   nav .links a:hover { color: var(--text); }
 
-  /* hero: split */
-  .hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; padding: 88px 0 72px; }
-  .hero h1 { font-size: clamp(34px, 5vw, 52px); line-height: 1.08; letter-spacing: -0.02em; font-weight: 700; }
-  .hero h1 span { color: var(--accent); }
-  .hero p.lead { color: var(--muted); max-width: 46ch; margin: 20px 0 28px; }
-  .cta { display: inline-block; background: var(--accent); color: #0b1512; font-weight: 600; padding: 11px 22px; border-radius: 10px; text-decoration: none; font-size: 15px; }
-  .cta:hover { filter: brightness(1.08); }
-  .cta:active { transform: translateY(1px); }
-  .cta.ghost { background: transparent; color: var(--text); box-shadow: inset 0 0 0 1px var(--line); margin-left: 12px; }
+  /* hero: split, live physics canvas behind */
+  .hero { position: relative; display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; padding: 72px 0 64px; }
+  .hero .backdrop { position: absolute; inset: 0; z-index: -1; opacity: .55; }
+  .hero canvas { width: 100%; height: 100%; display: block; }
+  .hero h1 { font-size: clamp(38px, 5.6vw, 62px); line-height: 1.03; letter-spacing: -0.03em; font-weight: 700; }
+  .hero h1 .word { display: inline-block; white-space: pre; }
+  .hero h1 .accent { color: var(--accent); position: relative; }
+  .hero p.lead { color: var(--muted); max-width: 46ch; margin: 22px 0 30px; font-size: 17px; }
+  .cta { display: inline-block; background: var(--accent); color: #0b1512; font-weight: 700; padding: 12px 24px; border-radius: 12px; text-decoration: none; font-size: 15px; transition: transform .35s cubic-bezier(.16,1,.3,1), box-shadow .35s; }
+  .cta:hover { transform: translateY(-2px); box-shadow: 0 10px 34px rgba(110,231,183,.22); }
+  .cta:active { transform: translateY(0) scale(.98); }
+  .cta.ghost { background: transparent; color: var(--text); box-shadow: inset 0 0 0 1px var(--line); margin-left: 12px; font-weight: 500; }
   .cta.ghost:hover { box-shadow: inset 0 0 0 1px var(--muted); }
-  .hero .media { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); aspect-ratio: 1/1; background: var(--bg-soft); }
+  .hero .media { position: relative; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); aspect-ratio: 1/1; background: var(--bg-soft); box-shadow: 0 24px 80px rgba(0,0,0,.5); }
   .hero .media video, .hero .media img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .hero .media figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 8px 14px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); background: color-mix(in srgb, var(--bg) 78%, transparent); }
+  .hero .media figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 16px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); background: color-mix(in srgb, var(--bg) 74%, transparent); }
   .hero .media figcaption b { color: var(--accent); font-weight: 500; }
 
-  /* section headers: one stack, no split */
+  /* kinetic fact marquee (the only one on the page) */
+  .ticker { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 14px 0; overflow: hidden; white-space: nowrap; }
+  .ticker .track { display: inline-block; animation: slide 38s linear infinite; }
+  .ticker span { font-family: var(--mono); font-size: 12.5px; letter-spacing: .04em; color: var(--muted); padding: 0 26px; }
+  .ticker span b { color: var(--accent); font-weight: 500; }
+  @keyframes slide { to { transform: translateX(-50%); } }
+
   section { padding: 96px 0; }
   section + section { border-top: 1px solid var(--line); }
-  h2 { font-size: 26px; letter-spacing: -0.01em; margin-bottom: 8px; }
-  .sub { color: var(--muted); max-width: 65ch; margin-bottom: 36px; }
+  h2 { font-size: 30px; letter-spacing: -0.02em; margin-bottom: 10px; font-weight: 700; }
+  .sub { color: var(--muted); max-width: 62ch; margin-bottom: 44px; }
 
-  /* projects: two differing rows */
-  .project { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; padding: 32px 0; }
+  .project { display: grid; grid-template-columns: 1fr 1fr; gap: 44px; align-items: center; padding: 36px 0; }
   .project + .project { border-top: 1px solid var(--line); }
-  .project .media { border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--bg-soft); }
+  .project .media { border-radius: 16px; overflow: hidden; border: 1px solid var(--line); background: var(--bg-soft); position: relative; transition: transform .5s cubic-bezier(.16,1,.3,1), box-shadow .5s; }
+  .project .media::after { content: ""; position: absolute; inset: 0; opacity: 0; transition: opacity .4s; background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 50%), rgba(110,231,183,.14), transparent 65%); pointer-events: none; }
+  .project .media:hover { transform: translateY(-6px) scale(1.012); box-shadow: 0 22px 60px rgba(0,0,0,.45); }
+  .project .media:hover::after { opacity: 1; }
   .project img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; }
-  .project h3 { font-size: 21px; margin-bottom: 10px; }
-  .project p { color: var(--muted); margin-bottom: 16px; }
-  .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-  .facts span { font-family: var(--mono); font-size: 12px; color: var(--muted); padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; }
-  .textlink { color: var(--accent); text-decoration: none; font-weight: 600; }
-  .textlink:hover { text-decoration: underline; }
+  .project h3 { font-size: 24px; margin-bottom: 12px; letter-spacing: -0.01em; }
+  .project p { color: var(--muted); margin-bottom: 18px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  .facts span { font-family: var(--mono); font-size: 12px; color: var(--muted); padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg-soft); transition: color .3s, border-color .3s; }
+  .project:hover .facts span { color: var(--text); }
+  .project:hover .facts span:first-child { color: var(--accent); border-color: var(--accent); }
+  .textlink { color: var(--accent); text-decoration: none; font-weight: 600; border-bottom: 1px solid transparent; transition: border-color .3s; }
+  .textlink:hover { border-color: var(--accent); }
 
-  /* about: single column stack */
   .about p { color: var(--muted); max-width: 65ch; }
   .about p + p { margin-top: 14px; }
-  .stack { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
-  .stack span { font-family: var(--mono); font-size: 12.5px; padding: 6px 12px; border-radius: 8px; background: var(--bg-soft); border: 1px solid var(--line); }
+  .stack { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+  .stack span { font-family: var(--mono); font-size: 12.5px; padding: 6px 13px; border-radius: 9px; background: var(--bg-soft); border: 1px solid var(--line); }
 
-  /* footer */
-  footer { border-top: 1px solid var(--line); padding: 40px 0 56px; }
+  footer { border-top: 1px solid var(--line); padding: 44px 0 56px; }
   footer .wrap { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
-  footer .links { display: flex; gap: 20px; }
-  footer a { color: var(--muted); text-decoration: none; font-size: 14px; }
+  footer .links { display: flex; gap: 20px; flex-wrap: wrap; }
+  footer a { color: var(--muted); text-decoration: none; font-size: 14px; transition: color .3s; }
   footer a:hover { color: var(--accent); }
   footer .fine { color: var(--muted); font-size: 13px; }
 
+  /* scroll reveals (CSS-gated, IO-driven) */
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal { opacity: 0; transform: translateY(26px); transition: opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1); transition-delay: var(--d, 0s); }
+    .reveal.in { opacity: 1; transform: none; }
+    @keyframes rise { from { opacity: 0; transform: translateY(30px); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+    .hero h1 .word { animation: rise .9s cubic-bezier(.16,1,.3,1) both; }
+    .hero h1 .word:nth-child(2) { animation-delay: .07s; }
+    .hero h1 .word:nth-child(3) { animation-delay: .14s; }
+    .hero h1 .word:nth-child(4) { animation-delay: .21s; }
+    .hero h1 .word:nth-child(5) { animation-delay: .28s; }
+    .hero p.lead { animation: rise .9s cubic-bezier(.16,1,.3,1) .38s both; }
+    .hero .media { animation: rise 1s cubic-bezier(.16,1,.3,1) .3s both; }
+    .hero .ctas { animation: rise .9s cubic-bezier(.16,1,.3,1) .48s both; }
+    @keyframes pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+    .hero .media figcaption b { animation: pulse 3s ease-in-out infinite; }
+  }
+
   @media (max-width: 768px) {
-    .hero { grid-template-columns: 1fr; padding: 48px 0 48px; gap: 32px; }
+    .hero { grid-template-columns: 1fr; padding: 48px 0; gap: 32px; }
     .project { grid-template-columns: 1fr; gap: 20px; padding: 28px 0; }
-    .project.rev .media { order: 0; }
-    section { padding: 48px 0; }
-    nav .links { gap: 16px; }
+    section { padding: 64px 0; }
+    nav .links { gap: 14px; font-size: 13px; }
+    .ticker span { padding: 0 16px; }
   }
 </style>
 </head>
 <body>
+
+<div class="aurora" aria-hidden="true"></div>
 
 <nav>
   <div class="wrap">
@@ -113,22 +143,31 @@
 
 <header class="wrap">
   <div class="hero">
+    <canvas class="backdrop" aria-hidden="true"></canvas>
     <div>
-      <h1>Machine learning that obeys <span>gravity</span>.</h1>
+      <h1><span class="word">Machine</span> <span class="word">learning</span> <span class="word">that</span> <span class="word">obeys</span> <span class="word accent">gravity.</span></h1>
       <p class="lead">BSc Computer Science. I train MLP, LSTM and graph neural networks against a real gravitational integrator and prove them out of distribution on the Solar System.</p>
-      <a class="cta" href="#projects">See projects</a>
-      <a class="cta ghost" href="https://harsh74-2.github.io/N-body-surrogates/">Benchmark results</a>
+      <div class="ctas">
+        <a class="cta" href="#projects">See projects</a>
+        <a class="cta ghost" href="https://harsh74-2.github.io/N-body-surrogates/">Benchmark results</a>
+      </div>
     </div>
     <figure class="media">
-      <video autoplay muted loop playsinline src="https://harsh74-2.github.io/N-body-surrogates/animations/N100_gnn_stable_sun_planets_moon/preset_sun_planets_moon_gnn_stable_3d.mp4"></video>
+      <video autoplay muted loop playsinline preload="metadata" src="https://harsh74-2.github.io/N-body-surrogates/animations/N100_gnn_stable_sun_planets_moon/preset_sun_planets_moon_gnn_stable_3d.mp4"></video>
       <figcaption><b>GNN rollout</b> Sun, planets and Moon, surrogate trajectories</figcaption>
     </figure>
   </div>
 </header>
 
+<div class="ticker" aria-hidden="true">
+  <div class="track">
+    <span>3 model families under identical training budgets</span><span><b>5x</b> lower error without autoregressive feedback</span><span>7 Solar-System presets from NASA JPL Horizons</span><span><b>N = 10..100</b> per-body variable-N surrogates</span><span><b>0%</b> task recovery on gpt-oss:120b agent chains</span><span>1149 links crawled green on the findings site</span><span>3 model families under identical training budgets</span><span><b>5x</b> lower error without autoregressive feedback</span><span>7 Solar-System presets from NASA JPL Horizons</span><span><b>N = 10..100</b> per-body variable-N surrogates</span><span><b>0%</b> task recovery on gpt-oss:120b agent chains</span><span>1149 links crawled green on the findings site</span>
+  </div>
+</div>
+
 <section id="projects" class="wrap">
-  <h2>Selected work</h2>
-  <p class="sub">Two open projects. Every number on the benchmark pages comes from a held-out test split, read straight from the result files.</p>
+  <h2 class="reveal">Selected work</h2>
+  <p class="sub reveal" style="--d:.08s">Three open projects. Every number on the benchmark pages comes from a held-out test split, read straight from the result files.</p>
 
   <div class="project">
     <div>
@@ -139,8 +178,8 @@
       <p>Bachelor thesis work. Learned surrogates for gravitational N-body dynamics, trained at body counts from 10 to 100, then validated out of distribution on real Solar-System initial conditions. Includes a rollout-stability benchmark comparing autoregressive compounding across architectures.</p>
       <a class="textlink" href="https://github.com/Harsh74-2/N-body-surrogates">Source and benchmark site</a>
     </div>
-    <div class="media">
-      <img src="https://harsh74-2.github.io/N-body-surrogates/plots/real_case/N100_gnn_stable/dashboard.png" alt="Evaluation dashboard for the GNN surrogate on the N=100 stable solar-system preset">
+    <div class="media" data-spot>
+      <img src="https://harsh74-2.github.io/N-body-surrogates/plots/real_case/N100_gnn_stable/dashboard.png" alt="Evaluation dashboard for the GNN surrogate on the N=100 stable solar-system preset" width="800" height="600" loading="lazy">
     </div>
   </div>
 
@@ -148,13 +187,13 @@
     <div>
       <h3>agentdrift</h3>
       <div class="facts">
-        <span>Python</span><span>Claude/LLM apps</span><span>Evaluation</span><span>Zero dependencies</span>
+        <span>Python</span><span>Evaluation</span><span>LLM agents</span><span>Zero dependencies</span>
       </div>
-      <p>An eval harness for LLM agents: measures how a single bad tool call compounds along a trajectory until the final answer breaks. Per-step error rates estimated from onset events, recovery rates, amplification against the independence baseline. Validated on a deterministic simulation backend, pluggable into any OpenAI-compatible model.</p>
+      <p>An eval harness for LLM agents: measures how a single bad tool call compounds along a trajectory until the final answer breaks. Onset-based per-step error estimation, recovery rates, amplification against the independent-error baseline. Validated on a deterministic simulation backend; runs against any OpenAI-compatible model.</p>
       <a class="textlink" href="https://github.com/Harsh74-2/agentdrift">Source</a>
     </div>
-    <div class="media">
-      <img src="assets/agentdrift_report.png" alt="agentdrift report: drift curve for gpt-oss:120b, 56% success at 13.4% per-step error, 0% recovery" width="800" height="600">
+    <div class="media" data-spot>
+      <img src="assets/agentdrift_report.png" alt="agentdrift report: drift curve for gpt-oss:120b, 56% success at 13.4% per-step error, 0% recovery" width="800" height="600" loading="lazy">
     </div>
   </div>
 
@@ -167,17 +206,17 @@
       <p>A virtual-reality tour platform in the browser: 360 panorama viewer with hotspots, plus an AI guide agent backed by a local LLM that answers questions about the tour and teleports the camera on request.</p>
       <a class="textlink" href="https://github.com/Harsh74-2/VR-WEB-APP">Source</a>
     </div>
-    <div class="media">
-      <img src="assets/vr_scene.png" alt="360 panorama view of the VR tour app with green hotspot spheres and the AI guide chat panel" width="800" height="600">
+    <div class="media" data-spot>
+      <img src="assets/vr_scene.png" alt="360 panorama view of the VR tour app with green hotspot spheres and the AI guide chat panel" width="800" height="600" loading="lazy">
     </div>
   </div>
 </section>
 
 <section id="about" class="wrap about">
-  <h2>About</h2>
-  <p>I study computer science at IU International University of Applied Sciences, where my bachelor thesis compared neural surrogates against a leapfrog gravitational integrator. The part I care most about is honest evaluation: held-out test splits, out-of-distribution checks on real ephemeris data, and knowing when a model compounds its own errors.</p>
-  <p>Currently working on Linux-first tooling (WSL2) and sharpening the same evaluation discipline on smaller research questions.</p>
-  <div class="stack">
+  <h2 class="reveal">About</h2>
+  <p class="reveal" style="--d:.08s">I study computer science at IU International University of Applied Sciences, where my bachelor thesis compared neural surrogates against a leapfrog gravitational integrator. The part I care most about is honest evaluation: held-out test splits, out-of-distribution checks on real ephemeris data, and knowing when a model compounds its own errors.</p>
+  <p class="reveal" style="--d:.14s">Currently building agent-evaluation tooling and sharpening the same evaluation discipline on smaller research questions.</p>
+  <div class="stack reveal" style="--d:.2s">
     <span>Python</span><span>PyTorch</span><span>Graph Neural Networks</span><span>NumPy</span><span>JavaScript</span><span>Three.js / WebGL</span><span>Git</span><span>Linux / WSL2</span>
   </div>
 </section>
@@ -189,7 +228,6 @@
       <a href="https://github.com/Harsh74-2">GitHub</a>
       <a href="https://www.linkedin.com/in/harsh-kumar-aa55453a2/">LinkedIn</a>
       <a href="https://harsh74-2.github.io/N-body-surrogates/">Benchmark site</a>
-      <a href="https://ko-fi.com/harsh40194">Support &nearr;</a>
       <a href="#projects">Projects</a>
     </div>
     <span class="fine">Harsh Kumar</span>
@@ -197,9 +235,72 @@
 </footer>
 
 <script>
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    document.querySelectorAll('video').forEach(v => { v.pause(); v.removeAttribute('autoplay'); });
+  // hero backdrop: a tiny live N-body sim - the thesis, as a vibe.
+  const c = document.querySelector('.hero .backdrop');
+  if (c && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const x = c.getContext('2d');
+    let W, H, bs = [];
+    const G = 170, DT = 1 / 120;
+    function reset() {
+      W = c.width = c.offsetWidth * devicePixelRatio;
+      H = c.height = c.offsetHeight * devicePixelRatio;
+      const cx = W * 0.26, cy = H * 0.52;   // orbit around the open left half
+      bs = Array.from({ length: 14 }, () => {
+        const r = Math.min(W, H) * (.12 + Math.random() * .3), a = Math.random() * 6.28;
+        const v = Math.sqrt(G * 260 / r);
+        return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a),
+                 vx: -Math.sin(a) * v, vy: Math.cos(a) * v,
+                 m: 40 + Math.random() * 220, tr: [] };
+      });
+    }
+    function step() {
+      const cx = W * 0.26, cy = H * 0.52;             // one soft attractor keeps it calm
+      for (const b of bs) {
+        const dx = cx - b.x, dy = cy - b.y, d2 = dx * dx + dy * dy + 4800;
+        const f = G * 260 / d2, d = Math.sqrt(d2);
+        b.vx += f * dx / d * DT; b.vy += f * dy / d * DT;
+        b.vx *= .9997; b.vy *= .9997;
+      }
+      for (const b of bs) { b.x += b.vx * DT * 60 / 2; b.y += b.vy * DT * 60 / 2; }
+    }
+    let acc = 0;
+    function frame() {
+      acc += 2;
+      while (acc-- > 0) step();
+      x.clearRect(0, 0, W, H);
+      for (const b of bs) {
+        b.tr.push([b.x, b.y]);
+        if (b.tr.length > 46) b.tr.shift();
+        x.beginPath(); x.strokeStyle = 'rgba(110,231,183,.32)'; x.lineWidth = devicePixelRatio * .8;
+        x.moveTo(b.tr[0][0], b.tr[0][1]);
+        for (const p of b.tr) x.lineTo(p[0], p[1]);
+        x.stroke();
+        x.beginPath(); x.fillStyle = b.m > 180 ? 'rgba(56,189,248,.8)' : 'rgba(110,231,183,.62)';
+        x.arc(b.x, b.y, Math.max(1.6, 1.6 + devicePixelRatio * (1 + b.m / 160)), 0, 6.2832); x.fill();
+      }
+      requestAnimationFrame(frame);
+    }
+    reset(); addEventListener('resize', reset); frame();
   }
+
+  // spotlight borders on project cards (cursor-tracked, CSS-var driven)
+  for (const el of document.querySelectorAll('[data-spot]'))
+    el.addEventListener('pointermove', e => {
+      const r = el.getBoundingClientRect();
+      el.style.setProperty('--mx', ((e.clientX - r.left) / r.width * 100) + '%');
+      el.style.setProperty('--my', ((e.clientY - r.top) / r.height * 100) + '%');
+    });
+
+  // scroll reveals
+  const els = document.querySelectorAll('.reveal');
+  const io = new IntersectionObserver(es => {
+    for (const e of es) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }, { threshold: 0.12 });
+  els.forEach(el => io.observe(el));
+
+  // reduced motion: pause the hero video, static page
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches)
+    document.querySelectorAll('video').forEach(v => { v.pause(); v.removeAttribute('autoplay'); });
 </script>
 </body>
 </html>
